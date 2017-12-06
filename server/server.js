@@ -5,51 +5,37 @@ const express = require('express');
 const socketIO = require('socket.io');
 
 const {generateMessage, generateLocationMessage} = require('./utils/message');
+const {isRealString} = require ('./utils/validation');
+const {Users} = require('./utils/users');
+
 const publicPath = path.join(__dirname, '/../public');
 const port = process.env.PORT || 3000;
 var app = express();
 var server = http.createServer(app);
 var io = socketIO(server);
+var users = new Users();
 
 app.use(express.static(publicPath));
 
 io.on('connection', (socket) => {
     console.log('New user connected');
 
-    socket.emit('newMessage', generateMessage('Admin', 'Welcome to the chat app'));
-    // socket.emit('newEmail', {
-    //     from: 'mike@example.com',
-    //     text: 'Hey, what\'s going on?',
-    //     createdAt: 123
-    // });
+    socket.on('join', (params, callback) => {
+        if (!isRealString(params.name) || !isRealString(params.room)) {
+            return callback('Name and room name are required.');
+        }
 
-    // socket.on('createEmail', (newEmail) => {
-    //     console.log('createEmail', newEmail);
-    // });
+        socket.join(params.room);
+        users.removeUser(socket.id);   //removes from user from room
+        users.addUser(socket.id, params.name, params.room);
 
-    // socket.emit('newMessage', {
-    //     from: 'barney@example.com',
-    //     text: 'but i love you!',
-    //     createdAt: 123
-    // });
+        io.to(params.room).emit('updateUserList', users.getUserList(params.room));
+        socket.emit('newMessage', generateMessage('Admin', 'Welcome to the chat app'));
 
-    //socket.emit from Admin text Welcome to the chat
-    ////////////////////////// this was the old way of setting up the socket.emit functionality.
-    // socket.emit('newMessage', {
-    //     from: 'Admin',
-    //     text: 'Welcome to the chat app',
-    //     createdAt: new Date().getTime()
-    // });
-    //socket.broadcastemit from Admin text New user joined
-    // old way:
-    // socket.broadcast.emit('newMessage', {
-    //     from: 'Admin',
-    //     text: 'New user joined',
-    //     createdAt: new Date().getTime()
-    // });
-    socket.broadcast.emit('newMessage', generateMessage('Admin',   'New user joined'));
+        socket.broadcast.to(params.room).emit('newMessage', generateMessage('Admin',   `${params.name} has joined the room`));
 
-
+        callback();
+        });
 
     socket.on('createMessage', (message, callback) =>{
         console.log('createMessage', message);
@@ -62,7 +48,12 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
-        console.log('User was disconnected');
+        var user = users.removeUser(socket.id);
+
+        if (user) {
+            io.to(user.room).emit('updateUserList', users.getUserList(user.room));  //updates user List
+            io.to(user.room).emit('newMessage', generateMessage('Admin', `${user.name} has left!`));  //prints goodbye message
+        }
     });
 });
 
